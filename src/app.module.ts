@@ -12,6 +12,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { ExtensionModule } from './extension/extension.module';
 import { SpeechModule } from './speech/speech.module';
 import { AiModule } from './ai/ai.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
     imports: [
@@ -41,6 +42,7 @@ import { AiModule } from './ai/ai.module';
         ShareModule,
         SpeechModule,
         AiModule,
+        HealthModule,
     ],
     controllers: [],
     providers: [],
