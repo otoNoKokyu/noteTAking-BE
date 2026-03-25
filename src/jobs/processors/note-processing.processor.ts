@@ -42,8 +42,8 @@ export class NoteProcessingProcessor extends WorkerHost {
                 note.topic = insightsData.topic || 'General';
                 note.tags = insightsData.tags || [];
                 note.insights = {
-                    todos: insightsData.insights.todos || [],
-                    recommendations: insightsData.insights.recommendations || []
+                    todos: insightsData.insights?.todos || [],
+                    recommendations: insightsData.insights?.recommendations || []
                 };
 
 
