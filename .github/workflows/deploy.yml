@@ -1,0 +1,48 @@
+name: CI/CD for NestJS with CodeDeploy
+
+on:
+  push:
+    branches:
+      - dev  # Change this to 'main' if that is your primary branch
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Build Application
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_ZONE }}
+
+      - name: Zip application files for CodeDeploy
+        run: |
+          zip -r deployment-artifact.zip . -x "*.git/*" "node_modules/*"
+
+      - name: Upload artifact to S3
+        run: aws s3 cp deployment-artifact.zip s3://${{ secrets.S3_BUCKET }}/${{ github.sha }}.zip
+
+      - name: Create CodeDeploy Deployment
+        run: |
+          aws deploy create-deployment \
+            --application-name ${{ secrets.CODEDEPLOY_APP_NAME }} \
+            --deployment-group-name ${{ secrets.DEPLOYMENT_GROUP }} \
+            --s3-location bucket=${{ secrets.S3_BUCKET }},key=${{ github.sha }}.zip,bundleType=zip
