@@ -90,7 +90,7 @@ export class AiService {
 
     async refineText(text: string): Promise<string> {
         try {
-            const model = this.genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+            const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
             const prompt = `You are a precision editor. Take the following raw, unstructured brain-dump or voice transcription and rewrite it as a clean, structured, and professional version. 
             
 Rules:
@@ -110,7 +110,7 @@ ${text}`;
     }
 
     async extractInsights(text: string): Promise<any> {
-        const model = this.genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+        const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         const prompt = `You are a silent cognitive extraction engine for a minimalist note-taking system. Analyze the note content below and return only a JSON object in this exact structure — no markdown, no code fences, no explanation.
 
 {
@@ -149,7 +149,7 @@ ${text}
     }
 
     async chat(query: string, context: string): Promise<any> {
-        const model = this.genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+        const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         const prompt = `You are a personal knowledge assistant. You only answer using the notes provided below — never use outside knowledge. If the answer is not in the notes, say so explicitly.
         
 Return a JSON object with this exact structure, no markdown, no code fences:
@@ -178,7 +178,7 @@ ${context}
     }
 
     async detectChatTopic(query: string, previousContext: string | null): Promise<{ isNewTopic: boolean, topicTitle: string }> {
-        const model = this.genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+        const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         const prompt = `You are a conversational topic analyzer. The user is asking a new question in a chat. 
 Determine if this new question is a continuation of the previous conversation or if it starts a completely new, unrelated topic.
 
@@ -214,7 +214,7 @@ Rules:
     }
 
     async summarizeCluster(topic: string, notes: string[]): Promise<any> {
-        const model = this.genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+        const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         const joined = notes.join('\n\n---\n\n');
         const prompt = `You are an analytical assistant. Below are a series of notes written by one person on a related topic. Generate:
 1) A 3–5 sentence summary

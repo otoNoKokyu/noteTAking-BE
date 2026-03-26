@@ -77,6 +77,23 @@ export class NotesService {
     async update(id: string, updateNoteDto: UpdateNoteDto, userId: string): Promise<Note> {
         const note = await this.findOne(id, userId);
 
+        // Versioning logic for manual edits
+        const latestVersion = await this.noteVersionsRepository.findOne({
+            where: { noteId: id },
+            order: { createdAt: 'DESC' },
+        });
+
+        const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+        const shouldVersion = !latestVersion || latestVersion.createdAt < thirtyMinutesAgo;
+
+        if (shouldVersion) {
+            const version = this.noteVersionsRepository.create({
+                noteId: id,
+                content: note.content,
+            });
+            await this.noteVersionsRepository.save(version);
+        }
+
         const updatedNote = Object.assign(note, {
             ...updateNoteDto,
             syncStatus: 'pending',
@@ -156,8 +173,13 @@ export class NotesService {
         }
 
         note.content = version.content;
+        note.rawContent = null;
         note.isProcessed = false;
         await this.notesRepository.save(note);
+
+        // Delete versions as we have reverted the refinement
+        await this.noteVersionsRepository.delete({ noteId: id });
+
         await this.jobsQueue.add('process-note', { noteId: note.id });
 
         return note;

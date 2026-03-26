@@ -14,7 +14,14 @@ import {
 } from '@aws-sdk/client-transcribe-streaming';
 import { ConfigService } from '@nestjs/config';
 
-@WebSocketGateway({ cors: { origin: '*' }, namespace: '/speech' })
+@WebSocketGateway({
+    cors: {
+        origin: ['http://localhost:5173', 'https://catchathought.ddns.net'],
+        credentials: true,
+    },
+    namespace: '/speech',
+    transports: ['websocket', 'polling'],
+})
 export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
     server: Server;
