@@ -4,7 +4,6 @@ import {
     SubscribeMessage,
     OnGatewayConnection,
     OnGatewayDisconnect,
-    OnGatewayInit,
     MessageBody,
     ConnectedSocket,
 } from '@nestjs/websockets';
@@ -15,18 +14,34 @@ import {
 } from '@aws-sdk/client-transcribe-streaming';
 import { ConfigService } from '@nestjs/config';
 
+// Helper function to build CORS origins from environment
+function getCorsOrigins(configService: ConfigService): string[] {
+    const allowedOrigins = configService.get<string>('ALLOWED_ORIGINS');
+    if (allowedOrigins) {
+        return allowedOrigins.split(',').map(o => o.trim());
+    }
+    return ['http://localhost:5173', 'http://localhost:3000'];
+}
+
 @WebSocketGateway({
+    cors: {
+        origin: true, // Allow all origins - will be validated server-side
+        credentials: true,
+    },
     namespace: '/speech',
     transports: ['websocket', 'polling'],
 })
-export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
+export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
     server: Server;
 
     private transcribeClient: TranscribeStreamingClient;
     private activeStreams: Map<string, boolean> = new Map();
+    private allowedOrigins: string[];
 
     constructor(private configService: ConfigService) {
+        this.allowedOrigins = getCorsOrigins(configService);
+        
         this.transcribeClient = new TranscribeStreamingClient({
             region: this.configService.get<string>('AWS_REGION') || 'us-east-1',
             credentials: {
@@ -34,24 +49,35 @@ export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect, 
                 secretAccessKey: this.configService.get<string>('AWS_SECRET_ACCESS_KEY') || '',
             },
         });
-    }
-
-    afterInit(server: Server) {
-        // Configure CORS dynamically from environment variables
-        const allowedOrigins = this.configService.get<string>('ALLOWED_ORIGINS')
-            ? this.configService.get<string>('ALLOWED_ORIGINS').split(',').map(o => o.trim())
-            : ['http://localhost:5173', 'http://localhost:3000'];
-
-        server.engine.opts.cors = {
-            origin: allowedOrigins,
-            credentials: true,
-        };
-
-        console.log('WebSocket CORS configured for origins:', allowedOrigins);
+        
+        console.log('SpeechGateway initialized with allowed origins:', this.allowedOrigins);
     }
 
     handleConnection(client: Socket) {
-        console.log(`Client connected to speech gateway: ${client.id}`);
+        // Validate origin on connection
+        const origin = client.request.headers.origin;
+        
+        if (!this.isOriginAllowed(origin)) {
+            console.warn(`Connection attempt from unauthorized origin: ${origin}`);
+            client.disconnect(true);
+            return;
+        }
+        
+        console.log(`Client connected to speech gateway: ${client.id} from ${origin}`);
+    }
+
+    private isOriginAllowed(origin: string | undefined): boolean {
+        if (!origin) return true; // Allow requests without origin (like localhost)
+        
+        return this.allowedOrigins.some(allowedOrigin => {
+            // Exact match or wildcard match
+            if (allowedOrigin === origin) return true;
+            if (allowedOrigin.includes('*')) {
+                const pattern = allowedOrigin.replace(/\*/g, '.*');
+                return new RegExp(`^${pattern}$`).test(origin);
+            }
+            return false;
+        });
     }
 
     handleDisconnect(client: Socket) {
