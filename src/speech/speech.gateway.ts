@@ -4,6 +4,7 @@ import {
     SubscribeMessage,
     OnGatewayConnection,
     OnGatewayDisconnect,
+    OnGatewayInit,
     MessageBody,
     ConnectedSocket,
 } from '@nestjs/websockets';
@@ -15,14 +16,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 
 @WebSocketGateway({
-    cors: {
-        origin: ['http://localhost:5173', 'https://catchathought.ddns.net'],
-        credentials: true,
-    },
     namespace: '/speech',
     transports: ['websocket', 'polling'],
 })
-export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
     @WebSocketServer()
     server: Server;
 
@@ -37,6 +34,20 @@ export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 secretAccessKey: this.configService.get<string>('AWS_SECRET_ACCESS_KEY') || '',
             },
         });
+    }
+
+    afterInit(server: Server) {
+        // Configure CORS dynamically from environment variables
+        const allowedOrigins = this.configService.get<string>('ALLOWED_ORIGINS')
+            ? this.configService.get<string>('ALLOWED_ORIGINS').split(',').map(o => o.trim())
+            : ['http://localhost:5173', 'http://localhost:3000'];
+
+        server.engine.opts.cors = {
+            origin: allowedOrigins,
+            credentials: true,
+        };
+
+        console.log('WebSocket CORS configured for origins:', allowedOrigins);
     }
 
     handleConnection(client: Socket) {
