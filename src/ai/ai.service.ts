@@ -31,13 +31,15 @@ export class AiService {
     }
 
     async generateEmbeddings(text: string): Promise<number[]> {
+        this.logger.log(`Generating embeddings for text: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
         try {
             const model = this.genAI.getGenerativeModel({ model: 'gemini-embedding-001' });
             const result = await model.embedContent(text);
             const vector = result.embedding.values.slice(0, 1024);
+            this.logger.log(`Generated embedding vector with dimension: ${vector.length}`);
             return vector;
         } catch (error) {
-            this.logger.error('Embedding generation failed', error);
+            this.logger.error(`Embedding generation failed: ${error.message}`, error.stack);
             return [];
         }
     }
@@ -89,6 +91,7 @@ export class AiService {
     }
 
     async refineText(text: string): Promise<string> {
+        this.logger.log(`Requesting text refinement for: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
         try {
             const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
             const prompt = `You are a precision editor. Take the following raw, unstructured brain-dump or voice transcription and rewrite it as a clean, structured, and professional version. 
@@ -102,7 +105,9 @@ Rules:
 Note:
 ${text}`;
             const result = await model.generateContent(prompt);
-            return result.response.text().trim();
+            const refinedText = result.response.text().trim();
+            this.logger.log(`Text refinement completed. Length: ${refinedText.length}`);
+            return refinedText;
         } catch (error) {
             this.logger.error(`Refinement failed: ${error.message}`, error.stack);
             throw error;
@@ -110,6 +115,7 @@ ${text}`;
     }
 
     async extractInsights(text: string): Promise<any> {
+        this.logger.log(`Extracting insights from text: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
         const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         const prompt = `You are a silent cognitive extraction engine for a minimalist note-taking system. Analyze the note content below and return only a JSON object in this exact structure — no markdown, no code fences, no explanation.
 
@@ -136,19 +142,29 @@ Note content to analyze:
 """
 ${text}
 """`;
-        const result = await model.generateContent(prompt);
-        const jsonMatch = result.response.text().match(/\{.*\}/s);
-        if (jsonMatch) {
-            try {
-                return JSON.parse(jsonMatch[0]);
-            } catch (e) {
-                this.logger.error('Failed to parse Gemini insight JSON.');
+        try {
+            const result = await model.generateContent(prompt);
+            const responseText = result.response.text();
+            const jsonMatch = responseText.match(/\{.*\}/s);
+            if (jsonMatch) {
+                try {
+                    const parsed = JSON.parse(jsonMatch[0]);
+                    this.logger.log(`Insights extracted successfully. Topic: ${parsed.topic}, Tags: ${parsed.tags?.length || 0}`);
+                    return parsed;
+                } catch (e) {
+                    this.logger.error(`Failed to parse Gemini insight JSON from response: ${responseText}`);
+                }
+            } else {
+                this.logger.warn(`No JSON found in Gemini insight response: ${responseText}`);
             }
+        } catch (error) {
+            this.logger.error(`Insight extraction failed: ${error.message}`, error.stack);
         }
         return { topic: 'General', tags: [] };
     }
 
     async chat(query: string, context: string): Promise<any> {
+        this.logger.log(`Requesting AI chat for query: "${query}"`);
         const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         const prompt = `You are a personal knowledge assistant. You only answer using the notes provided below — never use outside knowledge. If the answer is not in the notes, say so explicitly.
         
@@ -164,20 +180,30 @@ Notes Context:
 """
 ${context}
 """`;
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
-        const jsonMatch = text.match(/\{.*\}/s);
-        if (jsonMatch) {
-            try {
-                return JSON.parse(jsonMatch[0]);
-            } catch (e) {
-                this.logger.error('Failed to parse Gemini chat JSON.');
+        try {
+            const result = await model.generateContent(prompt);
+            const text = result.response.text();
+            const jsonMatch = text.match(/\{.*\}/s);
+            if (jsonMatch) {
+                try {
+                    const parsed = JSON.parse(jsonMatch[0]);
+                    this.logger.log(`AI chat response received. Referenced ${parsed.referencedNoteIds?.length || 0} notes.`);
+                    return parsed;
+                } catch (e) {
+                    this.logger.error(`Failed to parse Gemini chat JSON from response: ${text}`);
+                }
+            } else {
+                this.logger.warn(`No JSON found in Gemini chat response: ${text}`);
             }
+            return { answer: text, referencedNoteIds: [] };
+        } catch (error) {
+            this.logger.error(`AI chat failed: ${error.message}`, error.stack);
+            return { answer: "I'm sorry, I encountered an error while processing your request.", referencedNoteIds: [] };
         }
-        return { answer: text, referencedNoteIds: [] };
     }
 
     async detectChatTopic(query: string, previousContext: string | null): Promise<{ isNewTopic: boolean, topicTitle: string }> {
+        this.logger.log(`Detecting chat topic for query: "${query}"`);
         const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         const prompt = `You are a conversational topic analyzer. The user is asking a new question in a chat. 
 Determine if this new question is a continuation of the previous conversation or if it starts a completely new, unrelated topic.
@@ -203,10 +229,14 @@ Rules:
             const text = result.response.text();
             const jsonMatch = text.match(/\{.*\}/s);
             if (jsonMatch) {
-                return JSON.parse(jsonMatch[0]);
+                const parsed = JSON.parse(jsonMatch[0]);
+                this.logger.log(`Topic detection completed. New topic: ${parsed.isNewTopic}, Title: ${parsed.topicTitle}`);
+                return parsed;
+            } else {
+                this.logger.warn(`No JSON found in Gemini topic detection response: ${text}`);
             }
         } catch (error) {
-            this.logger.error('Failed to parse detectChatTopic JSON.', error);
+            this.logger.error(`Topic detection failed: ${error.message}`, error.stack);
         }
 
         // Fallback

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Note } from './entities/note.entity';
@@ -12,6 +12,8 @@ import { AiService } from '../ai/ai.service';
 
 @Injectable()
 export class NotesService {
+    private readonly logger = new Logger(NotesService.name);
+
     constructor(
         @InjectRepository(Note)
         private notesRepository: Repository<Note>,
@@ -24,6 +26,7 @@ export class NotesService {
     ) { }
 
     async create(createNoteDto: CreateNoteDto, userId: string): Promise<Note> {
+        this.logger.log(`Creating note for user ${userId}`);
         const note = this.notesRepository.create({
             ...createNoteDto,
             userId,
@@ -31,6 +34,7 @@ export class NotesService {
         });
 
         const savedNote = await this.notesRepository.save(note);
+        this.logger.log(`Note created with ID: ${savedNote.id}`);
         await this.jobsQueue.add('process-note', { noteId: savedNote.id });
         await this.jobsQueue.add('check-similarity', { noteId: savedNote.id });
 
@@ -69,12 +73,14 @@ export class NotesService {
     async findOne(id: string, userId: string): Promise<Note> {
         const note = await this.notesRepository.findOne({ where: { id, userId } });
         if (!note) {
+            this.logger.warn(`Note with ID ${id} not found for user ${userId}`);
             throw new NotFoundException(`Note with ID ${id} not found`);
         }
         return note;
     }
 
     async update(id: string, updateNoteDto: UpdateNoteDto, userId: string): Promise<Note> {
+        this.logger.log(`Updating note ${id} for user ${userId}`);
         const note = await this.findOne(id, userId);
 
         // Versioning logic for manual edits
@@ -83,10 +89,11 @@ export class NotesService {
             order: { createdAt: 'DESC' },
         });
 
-        const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
-        const shouldVersion = !latestVersion || latestVersion.createdAt < thirtyMinutesAgo;
+        const contentChanged = updateNoteDto.content !== undefined && updateNoteDto.content !== note.content;
+        const shouldVersion = contentChanged && (!latestVersion || latestVersion.content !== note.content);
 
         if (shouldVersion) {
+            this.logger.log(`Creating new version for note ${id}`);
             const version = this.noteVersionsRepository.create({
                 noteId: id,
                 content: note.content,
@@ -101,15 +108,18 @@ export class NotesService {
         });
 
         await this.notesRepository.save(updatedNote);
+        this.logger.log(`Note ${id} updated successfully`);
         await this.jobsQueue.add('process-note', { noteId: updatedNote.id });
 
         return updatedNote;
     }
 
     async remove(id: string, userId: string): Promise<void> {
+        this.logger.log(`Removing note ${id} for user ${userId}`);
         const note = await this.findOne(id, userId);
         await this.notesRepository.remove(note);
         await this.aiService.deleteVector(userId, id);
+        this.logger.log(`Note ${id} removed successfully`);
     }
 
     async getRecall(userId: string): Promise<Note | null> {
@@ -128,6 +138,7 @@ export class NotesService {
     }
 
     async refine(id: string, userId: string): Promise<Note> {
+        this.logger.log(`Refining note ${id} for user ${userId}`);
         const note = await this.findOne(id, userId);
 
         // Save original if not already set
@@ -135,25 +146,35 @@ export class NotesService {
             note.rawContent = note.content;
         }
 
-        // Create version for backup
-        const version = this.noteVersionsRepository.create({
-            noteId: id,
-            content: note.content,
-        });
-        await this.noteVersionsRepository.save(version);
-
         // Actual Refinement
-        const refined = await this.aiService.refineText(note.content);
-        note.content = refined;
-        note.isProcessed = false; // Trigger insight re-extraction
+        try {
+            const refined = await this.aiService.refineText(note.content);
+            if (refined !== note.content) {
+                // Create version for backup since content modified
+                const version = this.noteVersionsRepository.create({
+                    noteId: id,
+                    content: note.content,
+                });
+                await this.noteVersionsRepository.save(version);
 
-        const savedNote = await this.notesRepository.save(note);
+                note.content = refined;
+                note.isProcessed = false; // Trigger insight re-extraction
+            } else {
+                this.logger.log(`Refinement for note ${id} produced identical content. Skipping version creation.`);
+            }
 
-        // Queue background processing for insights and embeddings
-        await this.jobsQueue.add('process-note', { noteId: savedNote.id });
-        await this.jobsQueue.add('check-similarity', { noteId: savedNote.id });
+            const savedNote = await this.notesRepository.save(note);
+            this.logger.log(`Note ${id} refined successfully`);
 
-        return savedNote;
+            // Queue background processing for insights and embeddings
+            await this.jobsQueue.add('process-note', { noteId: savedNote.id });
+            await this.jobsQueue.add('check-similarity', { noteId: savedNote.id });
+
+            return savedNote;
+        } catch (error) {
+            this.logger.error(`Refinement failed for note ${id}: ${error.message}`, error.stack);
+            throw error;
+        }
     }
 
     async getVersions(id: string, userId: string): Promise<NoteVersion[]> {
@@ -165,10 +186,12 @@ export class NotesService {
     }
 
     async rollback(id: string, versionId: string, userId: string): Promise<Note> {
+        this.logger.log(`Rolling back note ${id} to version ${versionId} for user ${userId}`);
         const note = await this.findOne(id, userId);
         const version = await this.noteVersionsRepository.findOne({ where: { id: versionId, noteId: id } });
 
         if (!version) {
+            this.logger.warn(`Version ${versionId} not found for note ${id}`);
             throw new NotFoundException(`Version ${versionId} not found for note ${id}`);
         }
 
@@ -179,6 +202,7 @@ export class NotesService {
 
         // Delete versions as we have reverted the refinement
         await this.noteVersionsRepository.delete({ noteId: id });
+        this.logger.log(`Note ${id} rolled back successfully`);
 
         await this.jobsQueue.add('process-note', { noteId: note.id });
 

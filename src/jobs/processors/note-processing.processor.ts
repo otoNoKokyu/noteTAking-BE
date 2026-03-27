@@ -23,8 +23,12 @@ export class NoteProcessingProcessor extends WorkerHost {
 
         if (job.name === 'process-note') {
             const { noteId } = job.data;
+            this.logger.log(`Starting 'process-note' for note ${noteId}`);
             const note = await this.notesRepo.findOne({ where: { id: noteId } });
-            if (!note) return;
+            if (!note) {
+                this.logger.warn(`Note ${noteId} not found, skipping processing.`);
+                return;
+            }
 
             try {
                 this.logger.log(`Extracting insights for note ${noteId}...`);
@@ -46,8 +50,7 @@ export class NoteProcessingProcessor extends WorkerHost {
                     recommendations: insightsData.insights?.recommendations || []
                 };
 
-
-                this.logger.log(`Insights extracted for note ${noteId}: ${note}`);
+                this.logger.log(`Insights extracted for note ${noteId}. Title: "${note.title}", Topic: ${note.topic}`);
 
                 // 2. Determine timeOfDayBucket
                 const hour = new Date().getHours();
@@ -69,8 +72,10 @@ export class NoteProcessingProcessor extends WorkerHost {
                 this.logger.error(`Failed to process note ${note.id}:`, error);
             }
         } else if (job.name === 'check-similarity') {
+            const { noteId } = job.data;
+            this.logger.log(`Starting 'check-similarity' for note ${noteId}`);
             // Stub check-similarity
-            this.logger.log('Stub: Check similarity for note ' + job.data.noteId);
+            this.logger.log('Stub: Check similarity for note ' + noteId);
         }
     }
 }

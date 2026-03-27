@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import {
     WebSocketGateway,
     WebSocketServer,
@@ -32,6 +33,7 @@ function getCorsOrigins(configService: ConfigService): string[] {
     transports: ['websocket', 'polling'],
 })
 export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect {
+    private readonly logger = new Logger(SpeechGateway.name);
     @WebSocketServer()
     server: Server;
 
@@ -41,7 +43,7 @@ export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     constructor(private configService: ConfigService) {
         this.allowedOrigins = getCorsOrigins(configService);
-        
+
         this.transcribeClient = new TranscribeStreamingClient({
             region: this.configService.get<string>('AWS_REGION') || 'us-east-1',
             credentials: {
@@ -49,26 +51,26 @@ export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 secretAccessKey: this.configService.get<string>('AWS_SECRET_ACCESS_KEY') || '',
             },
         });
-        
-        console.log('SpeechGateway initialized with allowed origins:', this.allowedOrigins);
+
+        this.logger.log(`SpeechGateway initialized with allowed origins: ${this.allowedOrigins.join(', ')}`);
     }
 
     handleConnection(client: Socket) {
         // Validate origin on connection
         const origin = client.request.headers.origin;
-        
+
         if (!this.isOriginAllowed(origin)) {
-            console.warn(`Connection attempt from unauthorized origin: ${origin}`);
+            this.logger.warn(`Connection attempt from unauthorized origin: ${origin}`);
             client.disconnect(true);
             return;
         }
-        
-        console.log(`Client connected to speech gateway: ${client.id} from ${origin}`);
+
+        this.logger.log(`Client connected to speech gateway: ${client.id} from ${origin}`);
     }
 
     private isOriginAllowed(origin: string | undefined): boolean {
         if (!origin) return true; // Allow requests without origin (like localhost)
-        
+
         return this.allowedOrigins.some(allowedOrigin => {
             // Exact match or wildcard match
             if (allowedOrigin === origin) return true;
@@ -81,7 +83,7 @@ export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     handleDisconnect(client: Socket) {
-        console.log(`Client disconnected from speech gateway: ${client.id}`);
+        this.logger.log(`Client disconnected from speech gateway: ${client.id}`);
         this.stopTranscription(client.id);
     }
 
@@ -147,6 +149,7 @@ export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect {
         });
 
         try {
+            this.logger.log(`Starting transcription for client ${client.id} (Language: ${languageCode})`);
             this.activeStreams.set(client.id, true);
             const response = await this.transcribeClient.send(command);
 
@@ -154,7 +157,7 @@ export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect {
             this.consumeTranscriptInfo(client, response.TranscriptResultStream);
 
         } catch (error) {
-            console.error('Transcription start failed:', error);
+            this.logger.error(`Transcription start failed for client ${client.id}: ${error.message}`, error.stack);
             this.activeStreams.delete(client.id);
             client.emit('transcript-error', { message: error.message });
         }
@@ -192,7 +195,7 @@ export class SpeechGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 }
             }
         } catch (error) {
-            console.error('Error in transcript stream:', error);
+            this.logger.error(`Error in transcript stream for client ${client.id}: ${error.message}`, error.stack);
             client.emit('transcript-error', { message: error.message });
         } finally {
             this.activeStreams.delete(client.id);
